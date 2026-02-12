@@ -57,6 +57,10 @@ enum Commands {
         /// Number of worker processes
         #[arg(long, default_value = "4")]
         workers: u32,
+
+        /// Extract raw JPEG from single-image pages instead of re-rendering
+        #[arg(long)]
+        extract_images: bool,
     },
 
     /// Internal: render assigned pages in a single process
@@ -78,6 +82,9 @@ enum Commands {
 
         #[arg(long, rename_all = "lower", value_enum, default_value = "crop")]
         r#box: BoxType,
+
+        #[arg(long)]
+        extract_images: bool,
     },
 }
 
@@ -94,7 +101,8 @@ fn main() -> ExitCode {
             r#box,
             pages,
             workers,
-        } => render::run(&pdf, &output, target_width, quality, r#box, pages.as_deref(), workers),
+            extract_images,
+        } => render::run(&pdf, &output, target_width, quality, r#box, pages.as_deref(), workers, extract_images),
         Commands::RenderWorker {
             pdf,
             output,
@@ -102,7 +110,8 @@ fn main() -> ExitCode {
             target_width,
             quality,
             r#box,
-        } => run_worker(&pdf, &output, &pages, target_width, quality, r#box),
+            extract_images,
+        } => run_worker(&pdf, &output, &pages, target_width, quality, r#box, extract_images),
     };
 
     match result {
@@ -121,6 +130,7 @@ fn run_worker(
     target_width: u32,
     quality: u8,
     box_type: BoxType,
+    extract_images: bool,
 ) -> Result<(), error::Error> {
     // Worker needs to know max page count for range parsing; open PDF to check
     let pdfium = pdfium_init::load_pdfium()?;
@@ -132,7 +142,7 @@ fn run_worker(
     drop(pdfium);
 
     let page_list = page_range::parse_page_range(pages, max_page)?;
-    let result = render_worker::render_pages(pdf, output, &page_list, target_width, quality, box_type)?;
+    let result = render_worker::render_pages(pdf, output, &page_list, target_width, quality, box_type, extract_images)?;
 
     // Output result as JSON on stdout for parent to collect
     println!("{}", serde_json::to_string(&result).unwrap());

@@ -16,12 +16,15 @@ pub enum BoxType {
 #[derive(Serialize)]
 pub struct WorkerResult {
     pub pages_rendered: u32,
+    pub pages_extracted: u32,
     pub errors: Vec<String>,
 }
 
 /// Render a range of pages from a PDF to JPEG files.
 ///
 /// Pages are 1-based. Each page produces `page-NNNN.jpg` in `output_dir`.
+/// When `extract_images` is true, pages containing a single JPEG image are
+/// extracted directly without re-encoding.
 pub fn render_pages(
     pdf_path: &Path,
     output_dir: &Path,
@@ -29,6 +32,7 @@ pub fn render_pages(
     target_width: u32,
     quality: u8,
     box_type: BoxType,
+    extract_images: bool,
 ) -> Result<WorkerResult, Error> {
     let pdfium = load_pdfium()?;
 
@@ -39,6 +43,7 @@ pub fn render_pages(
     let render_config = PdfRenderConfig::new().set_target_width(target_width as i32);
 
     let mut pages_rendered = 0u32;
+    let mut pages_extracted = 0u32;
     let mut errors = Vec::new();
 
     for &page_num in pages {
@@ -57,6 +62,23 @@ pub fn render_pages(
             }
         };
 
+        // Try direct JPEG extraction first
+        if extract_images {
+            if let Some(result) = try_extract_jpeg(&page, output_dir, page_num) {
+                match result {
+                    Ok(()) => {
+                        pages_extracted += 1;
+                        eprint!("\rExtracted page {page_num}");
+                        continue;
+                    }
+                    Err(e) => {
+                        errors.push(format!("page {page_num} extract: {e}"));
+                        continue;
+                    }
+                }
+            }
+        }
+
         match render_page_to_jpeg(&page, &render_config, output_dir, page_num, quality) {
             Ok(()) => {
                 pages_rendered += 1;
@@ -67,12 +89,13 @@ pub fn render_pages(
             }
         }
     }
-    if pages_rendered > 0 {
+    if pages_rendered + pages_extracted > 0 {
         eprintln!();
     }
 
     Ok(WorkerResult {
         pages_rendered,
+        pages_extracted,
         errors,
     })
 }
@@ -91,6 +114,58 @@ fn apply_bleed_box(document: &mut PdfDocument, page_index: u16) {
     let _ = page
         .boundaries_mut()
         .set(PdfPageBoundaryBoxType::Crop, bleed_rect);
+}
+
+/// Try to extract a raw JPEG from a page that contains a single image object.
+///
+/// Returns `None` if the page is not a single-image page or the image is not
+/// stored as JPEG (DCTDecode filter). Returns `Some(Ok(()))` on successful
+/// extraction, `Some(Err(..))` on I/O failure.
+fn try_extract_jpeg(
+    page: &PdfPage,
+    output_dir: &Path,
+    page_num: u32,
+) -> Option<Result<(), Error>> {
+    let objects = page.objects();
+    if objects.len() != 1 {
+        return None;
+    }
+
+    let obj = objects.get(0).ok()?;
+    let image_obj = obj.as_image_object()?;
+
+    // Check that the image has exactly one filter and it's DCTDecode (JPEG)
+    if !is_jpeg_encoded(image_obj) {
+        return None;
+    }
+
+    Some(write_raw_jpeg(image_obj, output_dir, page_num))
+}
+
+fn is_jpeg_encoded(image_obj: &PdfPageImageObject) -> bool {
+    let filters = image_obj.filters();
+    if filters.len() != 1 {
+        return false;
+    }
+    matches!(filters.get(0).ok(), Some(f) if f.name() == "DCTDecode")
+}
+
+fn write_raw_jpeg(
+    image_obj: &PdfPageImageObject,
+    output_dir: &Path,
+    page_num: u32,
+) -> Result<(), Error> {
+    let data = image_obj
+        .get_raw_image_data()
+        .map_err(|e| Error::Render(format!("extract image data: {e}")))?;
+    if data.is_empty() {
+        return Err(Error::Render("empty image data".into()));
+    }
+
+    let filename = format!("page-{page_num:04}.jpg");
+    let path = output_dir.join(filename);
+    std::fs::write(&path, &data)?;
+    Ok(())
 }
 
 fn render_page_to_jpeg(

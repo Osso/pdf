@@ -10,9 +10,15 @@ use std::time::Instant;
 #[derive(Serialize)]
 struct RenderSummary {
     pages_rendered: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pages_extracted: u32,
     workers_used: u32,
     elapsed_secs: f64,
     output_dir: String,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 struct RenderPlan {
@@ -31,6 +37,7 @@ pub fn run(
     box_type: BoxType,
     pages: Option<&str>,
     num_workers: u32,
+    extract_images: bool,
 ) -> Result<(), Error> {
     let start = Instant::now();
     let plan = build_render_plan(pdf_path, pages, num_workers)?;
@@ -43,13 +50,13 @@ pub fn run(
         plan.effective_workers
     );
 
-    let (rendered, errors) = if plan.effective_workers <= 1 {
-        run_single_process(pdf_path, output_dir, &plan.page_list, target_width, quality, box_type)?
+    let (rendered, extracted, errors) = if plan.effective_workers <= 1 {
+        run_single_process(pdf_path, output_dir, &plan.page_list, target_width, quality, box_type, extract_images)?
     } else {
-        run_multi_process(pdf_path, output_dir, &plan, target_width, quality, box_type)?
+        run_multi_process(pdf_path, output_dir, &plan, target_width, quality, box_type, extract_images)?
     };
 
-    print_summary(rendered, plan.effective_workers, start, output_dir);
+    print_summary(rendered, extracted, plan.effective_workers, start, output_dir);
     check_errors(errors)
 }
 
@@ -80,9 +87,10 @@ fn run_single_process(
     target_width: u32,
     quality: u8,
     box_type: BoxType,
-) -> Result<(u32, Vec<String>), Error> {
-    let result = crate::render_worker::render_pages(pdf_path, output_dir, pages, target_width, quality, box_type)?;
-    Ok((result.pages_rendered, result.errors))
+    extract_images: bool,
+) -> Result<(u32, u32, Vec<String>), Error> {
+    let result = crate::render_worker::render_pages(pdf_path, output_dir, pages, target_width, quality, box_type, extract_images)?;
+    Ok((result.pages_rendered, result.pages_extracted, result.errors))
 }
 
 fn run_multi_process(
@@ -92,7 +100,8 @@ fn run_multi_process(
     target_width: u32,
     quality: u8,
     box_type: BoxType,
-) -> Result<(u32, Vec<String>), Error> {
+    extract_images: bool,
+) -> Result<(u32, u32, Vec<String>), Error> {
     let ranges = divide_pages(plan.page_list.len() as u32, plan.effective_workers);
     let current_exe = std::env::current_exe()?;
 
@@ -101,15 +110,16 @@ fn run_multi_process(
         .map(|&(start, end)| {
             let worker_pages = &plan.page_list[(start as usize - 1)..=(end as usize - 1)];
             let pages_str = format_page_list(worker_pages);
-            spawn_worker(&current_exe, pdf_path, output_dir, &pages_str, target_width, quality, box_type)
+            spawn_worker(&current_exe, pdf_path, output_dir, &pages_str, target_width, quality, box_type, extract_images)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     collect_worker_results(children)
 }
 
-fn collect_worker_results(children: Vec<std::process::Child>) -> Result<(u32, Vec<String>), Error> {
+fn collect_worker_results(children: Vec<std::process::Child>) -> Result<(u32, u32, Vec<String>), Error> {
     let mut total_rendered = 0u32;
+    let mut total_extracted = 0u32;
     let mut all_errors = Vec::new();
 
     for (i, child) in children.into_iter().enumerate() {
@@ -122,11 +132,12 @@ fn collect_worker_results(children: Vec<std::process::Child>) -> Result<(u32, Ve
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Ok(result) = serde_json::from_str::<WorkerOutput>(&stdout) {
             total_rendered += result.pages_rendered;
+            total_extracted += result.pages_extracted;
             all_errors.extend(result.errors);
         }
     }
 
-    Ok((total_rendered, all_errors))
+    Ok((total_rendered, total_extracted, all_errors))
 }
 
 fn check_errors(errors: Vec<String>) -> Result<(), Error> {
@@ -147,14 +158,15 @@ fn spawn_worker(
     target_width: u32,
     quality: u8,
     box_type: BoxType,
+    extract_images: bool,
 ) -> Result<std::process::Child, Error> {
     let box_str = match box_type {
         BoxType::Crop => "crop",
         BoxType::Bleed => "bleed",
     };
 
-    Command::new(exe)
-        .arg("render-worker")
+    let mut cmd = Command::new(exe);
+    cmd.arg("render-worker")
         .arg(pdf_path)
         .arg("-o")
         .arg(output_dir)
@@ -165,8 +177,13 @@ fn spawn_worker(
         .arg("--quality")
         .arg(quality.to_string())
         .arg("--box")
-        .arg(box_str)
-        .stdout(std::process::Stdio::piped())
+        .arg(box_str);
+
+    if extract_images {
+        cmd.arg("--extract-images");
+    }
+
+    cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(Error::Io)
@@ -203,10 +220,11 @@ fn push_range(parts: &mut Vec<String>, start: u32, end: u32) {
     }
 }
 
-fn print_summary(pages_rendered: u32, workers: u32, start: Instant, output_dir: &Path) {
+fn print_summary(pages_rendered: u32, pages_extracted: u32, workers: u32, start: Instant, output_dir: &Path) {
     let elapsed = start.elapsed().as_secs_f64();
     let summary = RenderSummary {
         pages_rendered,
+        pages_extracted,
         workers_used: workers,
         elapsed_secs: (elapsed * 100.0).round() / 100.0,
         output_dir: output_dir.display().to_string(),
@@ -217,6 +235,8 @@ fn print_summary(pages_rendered: u32, workers: u32, start: Instant, output_dir: 
 #[derive(serde::Deserialize)]
 struct WorkerOutput {
     pages_rendered: u32,
+    #[serde(default)]
+    pages_extracted: u32,
     #[serde(default)]
     errors: Vec<String>,
 }

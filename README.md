@@ -43,6 +43,7 @@ pdf render document.pdf -o /tmp/output
 pdf render document.pdf -o /tmp/output --workers 4 --target-width 2560
 pdf render document.pdf -o /tmp/output --pages 1-10 --quality 90
 pdf render document.pdf -o /tmp/output --box bleed
+pdf render document.pdf -o /tmp/output --extract-images
 ```
 
 Outputs `page-NNNN.jpg` files. Progress on stderr, JSON summary on stdout:
@@ -56,6 +57,14 @@ Outputs `page-NNNN.jpg` files. Progress on stderr, JSON summary on stdout:
 }
 ```
 
+### Direct image extraction
+
+With `--extract-images`, pages containing a single JPEG image are extracted directly from the PDF stream without re-rendering or re-encoding. This is common in comic PDFs where each page is a single image.
+
+Detection criteria: page has exactly 1 object (an `Image`) with a `DCTDecode` filter. Pages that don't match fall back to normal rendering automatically.
+
+Note: extracted images preserve their original dimensions and quality, bypassing `--target-width` and `--quality`.
+
 ### Options
 
 | Option | Default | Description |
@@ -65,6 +74,7 @@ Outputs `page-NNNN.jpg` files. Progress on stderr, JSON summary on stdout:
 | `--box` | crop | Page boundary: `crop` or `bleed` |
 | `--pages` | all | Page range: `1-10`, `3,5,7`, `1-5,8` |
 | `--workers` | 4 | Number of worker processes |
+| `--extract-images` | off | Extract raw JPEG from single-image pages |
 
 ## Architecture
 
@@ -103,6 +113,19 @@ Tested on 6 comic PDFs (8-300 pages, 3MB-344MB). pdfium with 4 workers vs single
 | 9781534339835 | 300 | 344MB | 88.2s | 35.9s | 2.5x |
 
 Output dimensions match. pdfium produces ~30% smaller JPEG files at the same quality setting.
+
+### With `--extract-images`
+
+For PDFs where pages are single JPEG images, extraction skips rendering entirely:
+
+| PDF | Pages | Render | Extract | Extracted | Speedup |
+|-----|-------|--------|---------|-----------|---------|
+| Legacy7_Issue2_highquality | 11 | 2.79s | 0.01s | 11/11 | 279x |
+| pesilat | 36 | 4.07s | 0.03s | 36/36 | 136x |
+| murinae-after-midnight-preview | 24 | 3.08s | 0.03s | 24/24 | 103x |
+| Spawn3 | 1139 | 159.6s | 100.9s | 639/1139 | 1.6x |
+
+Pages that aren't single JPEG images fall back to normal rendering (e.g. Spawn3 has 500 rendered + 639 extracted).
 
 ## pdfium version
 

@@ -21,6 +21,7 @@ src/
 - **Hidden `render-worker` subcommand**: Parent process divides pages and spawns `pdf render-worker` subprocesses. Workers output JSON on stdout for the parent to collect.
 - **BleedBox support**: `--box bleed` reads BleedBox bounds and overrides CropBox in-memory before rendering. Document is never written back to disk.
 - **No 2x oversample**: Unlike Ghostscript (which renders at 2x DPI then downscales), pdfium renders directly at target resolution with comparable quality.
+- **Direct JPEG extraction** (`--extract-images`): For pages containing a single image stored as JPEG (DCTDecode filter), raw bytes are copied directly from the PDF stream — zero decoding/re-encoding. Detection: page has exactly 1 object of type `Image` with a single `DCTDecode` filter. Falls back to normal rendering otherwise. Bypasses `--target-width` and `--quality` (preserves original image dimensions and quality).
 
 ## Dependencies
 
@@ -35,6 +36,7 @@ src/
 cargo test                    # unit tests (page_range)
 pdf info Tests/_data/test-release.pdf --all-pages
 pdf render Tests/_data/test-release.pdf -o /tmp/test --workers 4
+pdf render Tests/_data/test-release.pdf -o /tmp/test --workers 4 --extract-images
 ```
 
 Test PDFs in `/syncthing/Sync/Projects/globalcomix/Comic Samples/`.
