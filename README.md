@@ -127,6 +127,21 @@ For PDFs where pages are single JPEG images, extraction skips rendering entirely
 
 Pages that aren't single JPEG images fall back to normal rendering (e.g. Spawn3 has 500 rendered + 639 extracted).
 
+### JPEG encoder: `image` crate vs libvips
+
+Build with `--features vips` and pass `--encoder vips` to use libvips (libjpeg-turbo) instead of the Rust `image` crate for JPEG encoding. Same 6 PDFs, 4 workers, quality=100:
+
+| PDF | Pages | image | vips | Speedup |
+|-----|-------|-------|------|---------|
+| GUN LEGS MAN V4 | 8 | 0.74s | 0.56s | 1.3x |
+| matching-our-answers | 22 | 1.56s | 1.05s | 1.5x |
+| 9798892150095 | 30 | 19.23s | 19.21s | 1.0x |
+| pesilat | 36 | 2.94s | 1.94s | 1.5x |
+| godslap | 50 | 5.22s | 2.92s | 1.8x |
+| 9781534339835 | 300 | 22.74s | 15.24s | 1.5x |
+
+libvips is ~1.5x faster for JPEG encoding. The exception (9798892150095) is a render-bound PDF where pdfium dominates. Output files are 10-47% larger at q100 due to less aggressive compression, but visual quality is identical (>50dB PSNR on all pages).
+
 ## pdfium version
 
 The `pdfium_7350` feature flag is used to match the pdfium 7428 binary from AUR. To use a newer pdfium (7543+), change the feature in `Cargo.toml` to `pdfium_7543` or `pdfium_latest`.
