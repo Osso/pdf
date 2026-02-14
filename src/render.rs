@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::page_range::divide_pages;
 use crate::pdfium_init::load_pdfium;
-use crate::render_worker::BoxType;
+use crate::render_worker::{BoxType, JpegEncoderType};
 use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
@@ -38,6 +38,7 @@ pub fn run(
     pages: Option<&str>,
     num_workers: u32,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<(), Error> {
     let start = Instant::now();
     let plan = build_render_plan(pdf_path, pages, num_workers)?;
@@ -51,9 +52,9 @@ pub fn run(
     );
 
     let (rendered, extracted, errors) = if plan.effective_workers <= 1 {
-        run_single_process(pdf_path, output_dir, &plan.page_list, target_width, quality, box_type, extract_images)?
+        run_single_process(pdf_path, output_dir, &plan.page_list, target_width, quality, box_type, extract_images, encoder)?
     } else {
-        run_multi_process(pdf_path, output_dir, &plan, target_width, quality, box_type, extract_images)?
+        run_multi_process(pdf_path, output_dir, &plan, target_width, quality, box_type, extract_images, encoder)?
     };
 
     print_summary(rendered, extracted, plan.effective_workers, start, output_dir);
@@ -88,8 +89,9 @@ fn run_single_process(
     quality: u8,
     box_type: BoxType,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<(u32, u32, Vec<String>), Error> {
-    let result = crate::render_worker::render_pages(pdf_path, output_dir, pages, target_width, quality, box_type, extract_images)?;
+    let result = crate::render_worker::render_pages(pdf_path, output_dir, pages, target_width, quality, box_type, extract_images, encoder)?;
     Ok((result.pages_rendered, result.pages_extracted, result.errors))
 }
 
@@ -101,6 +103,7 @@ fn run_multi_process(
     quality: u8,
     box_type: BoxType,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<(u32, u32, Vec<String>), Error> {
     let ranges = divide_pages(plan.page_list.len() as u32, plan.effective_workers);
     let current_exe = std::env::current_exe()?;
@@ -110,7 +113,7 @@ fn run_multi_process(
         .map(|&(start, end)| {
             let worker_pages = &plan.page_list[(start as usize - 1)..=(end as usize - 1)];
             let pages_str = format_page_list(worker_pages);
-            spawn_worker(&current_exe, pdf_path, output_dir, &pages_str, target_width, quality, box_type, extract_images)
+            spawn_worker(&current_exe, pdf_path, output_dir, &pages_str, target_width, quality, box_type, extract_images, encoder)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -159,10 +162,16 @@ fn spawn_worker(
     quality: u8,
     box_type: BoxType,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<std::process::Child, Error> {
     let box_str = match box_type {
         BoxType::Crop => "crop",
         BoxType::Bleed => "bleed",
+    };
+
+    let encoder_str = match encoder {
+        JpegEncoderType::Image => "image",
+        JpegEncoderType::Vips => "vips",
     };
 
     let mut cmd = Command::new(exe);
@@ -177,7 +186,9 @@ fn spawn_worker(
         .arg("--quality")
         .arg(quality.to_string())
         .arg("--box")
-        .arg(box_str);
+        .arg(box_str)
+        .arg("--encoder")
+        .arg(encoder_str);
 
     if extract_images {
         cmd.arg("--extract-images");

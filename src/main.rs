@@ -6,7 +6,7 @@ mod render;
 mod render_worker;
 
 use clap::{Parser, Subcommand};
-use render_worker::BoxType;
+use render_worker::{BoxType, JpegEncoderType};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -61,6 +61,10 @@ enum Commands {
         /// Extract raw JPEG from single-image pages instead of re-rendering
         #[arg(long)]
         extract_images: bool,
+
+        /// JPEG encoder backend
+        #[arg(long, value_enum, default_value = "image")]
+        encoder: JpegEncoderType,
     },
 
     /// Internal: render assigned pages in a single process
@@ -85,6 +89,10 @@ enum Commands {
 
         #[arg(long)]
         extract_images: bool,
+
+        /// JPEG encoder backend
+        #[arg(long, value_enum, default_value = "image")]
+        encoder: JpegEncoderType,
     },
 }
 
@@ -102,7 +110,8 @@ fn main() -> ExitCode {
             pages,
             workers,
             extract_images,
-        } => render::run(&pdf, &output, target_width, quality, r#box, pages.as_deref(), workers, extract_images),
+            encoder,
+        } => render::run(&pdf, &output, target_width, quality, r#box, pages.as_deref(), workers, extract_images, encoder),
         Commands::RenderWorker {
             pdf,
             output,
@@ -111,7 +120,8 @@ fn main() -> ExitCode {
             quality,
             r#box,
             extract_images,
-        } => run_worker(&pdf, &output, &pages, target_width, quality, r#box, extract_images),
+            encoder,
+        } => run_worker(&pdf, &output, &pages, target_width, quality, r#box, extract_images, encoder),
     };
 
     match result {
@@ -131,6 +141,7 @@ fn run_worker(
     quality: u8,
     box_type: BoxType,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<(), error::Error> {
     // Worker needs to know max page count for range parsing; open PDF to check
     let pdfium = pdfium_init::load_pdfium()?;
@@ -142,7 +153,7 @@ fn run_worker(
     drop(pdfium);
 
     let page_list = page_range::parse_page_range(pages, max_page)?;
-    let result = render_worker::render_pages(pdf, output, &page_list, target_width, quality, box_type, extract_images)?;
+    let result = render_worker::render_pages(pdf, output, &page_list, target_width, quality, box_type, extract_images, encoder)?;
 
     // Output result as JSON on stdout for parent to collect
     println!("{}", serde_json::to_string(&result).unwrap());

@@ -13,6 +13,15 @@ pub enum BoxType {
     Bleed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
+pub enum JpegEncoderType {
+    /// Rust `image` crate (default)
+    #[default]
+    Image,
+    /// libvips (requires --features vips)
+    Vips,
+}
+
 #[derive(Serialize)]
 pub struct WorkerResult {
     pub pages_rendered: u32,
@@ -33,6 +42,7 @@ pub fn render_pages(
     quality: u8,
     box_type: BoxType,
     extract_images: bool,
+    encoder: JpegEncoderType,
 ) -> Result<WorkerResult, Error> {
     let pdfium = load_pdfium()?;
 
@@ -79,7 +89,7 @@ pub fn render_pages(
             }
         }
 
-        match render_page_to_jpeg(&page, &render_config, output_dir, page_num, quality) {
+        match render_page_to_jpeg(&page, &render_config, output_dir, page_num, quality, encoder) {
             Ok(()) => {
                 pages_rendered += 1;
                 eprint!("\rRendered page {page_num}");
@@ -174,6 +184,7 @@ fn render_page_to_jpeg(
     output_dir: &Path,
     page_num: u32,
     quality: u8,
+    encoder_type: JpegEncoderType,
 ) -> Result<(), Error> {
     let bitmap = page
         .render_with_config(config)
@@ -183,13 +194,66 @@ fn render_page_to_jpeg(
 
     let filename = format!("page-{page_num:04}.jpg");
     let path = output_dir.join(filename);
-    let file = File::create(&path)?;
-    let writer = BufWriter::new(file);
 
+    match encoder_type {
+        JpegEncoderType::Image => encode_jpeg_image(&image, &path, quality),
+        JpegEncoderType::Vips => encode_jpeg_vips(&image, &path, quality),
+    }
+}
+
+fn encode_jpeg_image(
+    image: &image::RgbImage,
+    path: &Path,
+    quality: u8,
+) -> Result<(), Error> {
+    let file = File::create(path)?;
+    let writer = BufWriter::new(file);
     let encoder = JpegEncoder::new_with_quality(writer, quality);
     image
         .write_with_encoder(encoder)
         .map_err(|e| Error::Render(format!("JPEG encode failed: {e}")))?;
+    Ok(())
+}
+
+#[cfg(feature = "vips")]
+fn encode_jpeg_vips(
+    image: &image::RgbImage,
+    path: &Path,
+    quality: u8,
+) -> Result<(), Error> {
+    let (width, height) = image.dimensions();
+    let raw = image.as_raw();
+
+    let vips_image = libvips::VipsImage::new_from_memory(
+        raw,
+        width as i32,
+        height as i32,
+        3,
+        libvips::ops::BandFormat::Uchar,
+    )
+    .map_err(|e| Error::Render(format!("vips from memory: {e}")))?;
+
+    let path_str = path.to_str().ok_or_else(|| Error::Render("non-UTF8 path".into()))?;
+    libvips::ops::jpegsave_with_opts(
+        &vips_image,
+        path_str,
+        &libvips::ops::JpegsaveOptions {
+            q: quality as i32,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| Error::Render(format!("vips jpegsave: {e}")))?;
 
     Ok(())
+}
+
+#[cfg(not(feature = "vips"))]
+fn encode_jpeg_vips(
+    _image: &image::RgbImage,
+    _path: &Path,
+    _quality: u8,
+) -> Result<(), Error> {
+    Err(Error::InvalidArgs(
+        "--encoder vips requires building with --features vips".into(),
+    ))
 }
