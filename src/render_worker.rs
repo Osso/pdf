@@ -29,6 +29,15 @@ pub struct WorkerResult {
     pub errors: Vec<String>,
 }
 
+/// Rendering options shared between single-process and multi-process modes.
+pub struct RenderOptions {
+    pub target_width: u32,
+    pub quality: u8,
+    pub box_type: BoxType,
+    pub extract_images: bool,
+    pub encoder: JpegEncoderType,
+}
+
 /// Render a range of pages from a PDF to JPEG files.
 ///
 /// Pages are 1-based. Each page produces `page-NNNN.jpg` in `output_dir`.
@@ -38,19 +47,16 @@ pub fn render_pages(
     pdf_path: &Path,
     output_dir: &Path,
     pages: &[u32],
-    target_width: u32,
-    quality: u8,
-    box_type: BoxType,
-    extract_images: bool,
-    encoder: JpegEncoderType,
+    opts: &RenderOptions,
 ) -> Result<WorkerResult, Error> {
+    let RenderOptions { target_width, quality, box_type, extract_images, encoder } = opts;
     let pdfium = load_pdfium()?;
 
     let mut document = pdfium
         .load_pdf_from_file(pdf_path, None)
         .map_err(|e| Error::PdfInvalid(format!("{}: {e}", pdf_path.display())))?;
 
-    let render_config = PdfRenderConfig::new().set_target_width(target_width as i32);
+    let render_config = PdfRenderConfig::new().set_target_width(*target_width as i32);
 
     let mut pages_rendered = 0u32;
     let mut pages_extracted = 0u32;
@@ -60,7 +66,7 @@ pub fn render_pages(
         let page_index = (page_num - 1) as u16;
 
         // Apply BleedBox as CropBox if requested
-        if box_type == BoxType::Bleed {
+        if *box_type == BoxType::Bleed {
             apply_bleed_box(&mut document, page_index);
         }
 
@@ -73,23 +79,23 @@ pub fn render_pages(
         };
 
         // Try direct JPEG extraction first
-        if extract_images {
-            if let Some(result) = try_extract_jpeg(&page, output_dir, page_num) {
-                match result {
-                    Ok(()) => {
-                        pages_extracted += 1;
-                        eprint!("\rExtracted page {page_num}");
-                        continue;
-                    }
-                    Err(e) => {
-                        errors.push(format!("page {page_num} extract: {e}"));
-                        continue;
-                    }
+        if *extract_images
+            && let Some(result) = try_extract_jpeg(&page, output_dir, page_num)
+        {
+            match result {
+                Ok(()) => {
+                    pages_extracted += 1;
+                    eprint!("\rExtracted page {page_num}");
+                    continue;
+                }
+                Err(e) => {
+                    errors.push(format!("page {page_num} extract: {e}"));
+                    continue;
                 }
             }
         }
 
-        match render_page_to_jpeg(&page, &render_config, output_dir, page_num, quality, encoder) {
+        match render_page_to_jpeg(&page, &render_config, output_dir, page_num, *quality, *encoder) {
             Ok(()) => {
                 pages_rendered += 1;
                 eprint!("\rRendered page {page_num}");

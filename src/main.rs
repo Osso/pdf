@@ -6,7 +6,7 @@ mod render;
 mod render_worker;
 
 use clap::{Parser, Subcommand};
-use render_worker::{BoxType, JpegEncoderType};
+use render_worker::{BoxType, JpegEncoderType, RenderOptions};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -111,7 +111,13 @@ fn main() -> ExitCode {
             workers,
             extract_images,
             encoder,
-        } => render::run(&pdf, &output, target_width, quality, r#box, pages.as_deref(), workers, extract_images, encoder),
+        } => render::run(
+            &pdf,
+            &output,
+            pages.as_deref(),
+            workers,
+            RenderOptions { target_width, quality, box_type: r#box, extract_images, encoder },
+        ),
         Commands::RenderWorker {
             pdf,
             output,
@@ -121,7 +127,12 @@ fn main() -> ExitCode {
             r#box,
             extract_images,
             encoder,
-        } => run_worker(&pdf, &output, &pages, target_width, quality, r#box, extract_images, encoder),
+        } => run_worker(
+            &pdf,
+            &output,
+            &pages,
+            RenderOptions { target_width, quality, box_type: r#box, extract_images, encoder },
+        ),
     };
 
     match result {
@@ -137,11 +148,7 @@ fn run_worker(
     pdf: &std::path::Path,
     output: &std::path::Path,
     pages: &str,
-    target_width: u32,
-    quality: u8,
-    box_type: BoxType,
-    extract_images: bool,
-    encoder: JpegEncoderType,
+    opts: RenderOptions,
 ) -> Result<(), error::Error> {
     // Worker needs to know max page count for range parsing; open PDF to check
     let pdfium = pdfium_init::load_pdfium()?;
@@ -153,7 +160,7 @@ fn run_worker(
     drop(pdfium);
 
     let page_list = page_range::parse_page_range(pages, max_page)?;
-    let result = render_worker::render_pages(pdf, output, &page_list, target_width, quality, box_type, extract_images, encoder)?;
+    let result = render_worker::render_pages(pdf, output, &page_list, &opts)?;
 
     // Output result as JSON on stdout for parent to collect
     println!("{}", serde_json::to_string(&result).unwrap());
