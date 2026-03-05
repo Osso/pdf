@@ -78,21 +78,14 @@ pub fn render_pages(
             }
         };
 
-        // Try direct JPEG extraction first
-        if *extract_images
-            && let Some(result) = try_extract_jpeg(&page, output_dir, page_num)
-        {
-            match result {
-                Ok(()) => {
-                    pages_extracted += 1;
-                    eprint!("\rExtracted page {page_num}");
-                    continue;
-                }
-                Err(e) => {
-                    errors.push(format!("page {page_num} extract: {e}"));
-                    continue;
-                }
+        // Try direct JPEG extraction first — fall through to rasterization on failure
+        if *extract_images {
+            if let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num) {
+                pages_extracted += 1;
+                eprint!("\rExtracted page {page_num}");
+                continue;
             }
+            // None = not a single-JPEG page, Some(Err) = corrupt JPEG — either way, rasterize
         }
 
         match render_page_to_jpeg(&page, &render_config, output_dir, page_num, *quality, *encoder) {
@@ -176,6 +169,12 @@ fn write_raw_jpeg(
         .map_err(|e| Error::Render(format!("extract image data: {e}")))?;
     if data.is_empty() {
         return Err(Error::Render("empty image data".into()));
+    }
+
+    // Validate the JPEG by fully decoding it — some PDFs embed JPEGs with
+    // corrupt Huffman data that pass header checks but fail on pixel decode.
+    if let Err(e) = image::load_from_memory_with_format(&data, image::ImageFormat::Jpeg) {
+        return Err(Error::Render(format!("corrupt JPEG data: {e}")));
     }
 
     let filename = format!("page-{page_num:04}.jpg");
