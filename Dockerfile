@@ -1,6 +1,7 @@
 FROM rust:1.92-bookworm AS builder
 
 WORKDIR /build
+RUN apt-get update && apt-get install -y cmake nasm && rm -rf /var/lib/apt/lists/*
 RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz \
     | tar xz -C /tmp
 
