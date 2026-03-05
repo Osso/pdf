@@ -171,14 +171,24 @@ fn write_raw_jpeg(
         return Err(Error::Render("empty image data".into()));
     }
 
-    // Validate the JPEG by fully decoding it — some PDFs embed JPEGs with
-    // corrupt Huffman data that pass header checks but fail on pixel decode.
-    if let Err(e) = image::load_from_memory_with_format(&data, image::ImageFormat::Jpeg) {
-        return Err(Error::Render(format!("corrupt JPEG data: {e}")));
-    }
-
     let filename = format!("page-{page_num:04}.jpg");
     let path = output_dir.join(filename);
+
+    // Validate with libjpeg-turbo (same decoder as libvips). If it fails,
+    // the `image` crate can still decode it — re-encode to produce a clean
+    // JPEG that vips will accept.
+    if turbojpeg::decompress(&data, turbojpeg::PixelFormat::RGB).is_err() {
+        let img = image::load_from_memory_with_format(&data, image::ImageFormat::Jpeg)
+            .map_err(|e| Error::Render(format!("JPEG decode failed: {e}")))?;
+        let file = File::create(&path)?;
+        let writer = BufWriter::new(file);
+        img.into_rgb8()
+            .write_with_encoder(JpegEncoder::new_with_quality(writer, 100))
+            .map_err(|e| Error::Render(format!("JPEG re-encode failed: {e}")))?;
+        eprintln!("  (re-encoded corrupt JPEG for page {page_num})");
+        return Ok(());
+    }
+
     std::fs::write(&path, &data)?;
     Ok(())
 }
