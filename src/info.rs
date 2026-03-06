@@ -38,9 +38,10 @@ pub fn run(pdf_path: &Path, all_pages: bool) -> Result<(), Error> {
             .collect()
     } else {
         // Just first page by default
-        let first = document.pages().first().map_err(|_| {
-            Error::PdfInvalid("PDF has no pages".into())
-        })?;
+        let first = document
+            .pages()
+            .first()
+            .map_err(|_| Error::PdfInvalid("PDF has no pages".into()))?;
         vec![PageInfo {
             page: 1,
             width_pt: first.width().value,

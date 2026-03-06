@@ -124,10 +124,7 @@ mod tests {
 
     #[test]
     fn divide_with_remainder() {
-        assert_eq!(
-            divide_pages(10, 3),
-            vec![(1, 4), (5, 7), (8, 10)]
-        );
+        assert_eq!(divide_pages(10, 3), vec![(1, 4), (5, 7), (8, 10)]);
     }
 
     #[test]

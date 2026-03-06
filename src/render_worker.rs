@@ -49,7 +49,13 @@ pub fn render_pages(
     pages: &[u32],
     opts: &RenderOptions,
 ) -> Result<WorkerResult, Error> {
-    let RenderOptions { target_width, quality, box_type, extract_images, encoder } = opts;
+    let RenderOptions {
+        target_width,
+        quality,
+        box_type,
+        extract_images,
+        encoder,
+    } = opts;
     let pdfium = load_pdfium()?;
 
     let mut document = pdfium
@@ -88,7 +94,14 @@ pub fn render_pages(
             // None = not a single-JPEG page, Some(Err) = corrupt JPEG — either way, rasterize
         }
 
-        match render_page_to_jpeg(&page, &render_config, output_dir, page_num, *quality, *encoder) {
+        match render_page_to_jpeg(
+            &page,
+            &render_config,
+            output_dir,
+            page_num,
+            *quality,
+            *encoder,
+        ) {
             Ok(()) => {
                 pages_rendered += 1;
                 eprint!("\rRendered page {page_num}");
@@ -130,11 +143,7 @@ fn apply_bleed_box(document: &mut PdfDocument, page_index: u16) {
 /// Returns `None` if the page is not a single-image page or the image is not
 /// stored as JPEG (DCTDecode filter). Returns `Some(Ok(()))` on successful
 /// extraction, `Some(Err(..))` on I/O failure.
-fn try_extract_jpeg(
-    page: &PdfPage,
-    output_dir: &Path,
-    page_num: u32,
-) -> Option<Result<(), Error>> {
+fn try_extract_jpeg(page: &PdfPage, output_dir: &Path, page_num: u32) -> Option<Result<(), Error>> {
     let objects = page.objects();
     if objects.len() != 1 {
         return None;
@@ -160,11 +169,48 @@ fn is_extractable_jpeg(image_obj: &PdfPageImageObject) -> bool {
         return false;
     }
     // CMYK JPEGs extracted raw get their colors inverted when decoded as RGB.
-    // Fall through to pdfium rasterization which handles the conversion.
-    if matches!(image_obj.color_space(), Ok(PdfColorSpace::DeviceCMYK)) {
+    // Detect CMYK via raw JPEG SOF marker (covers DeviceCMYK and ICC-based CMYK).
+    let data = match image_obj.get_raw_image_data() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    if jpeg_is_cmyk(&data) {
         return false;
     }
     true
+}
+
+/// Check if raw JPEG data is CMYK by reading the SOF marker's component count.
+/// CMYK JPEGs have 4 components; RGB has 3, grayscale has 1.
+fn jpeg_is_cmyk(data: &[u8]) -> bool {
+    // Scan for SOF0 (0xFFC0) or SOF2 (0xFFC2) marker
+    let mut i = 0;
+    while i + 1 < data.len() {
+        if data[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        // SOF0 = 0xC0, SOF1 = 0xC1, SOF2 = 0xC2
+        if matches!(marker, 0xC0 | 0xC1 | 0xC2) {
+            // SOF layout: FF Cn [length:2] [precision:1] [height:2] [width:2] [components:1]
+            if i + 9 < data.len() {
+                let num_components = data[i + 9];
+                return num_components == 4;
+            }
+            return false;
+        }
+        // Skip non-SOF markers (read length and advance)
+        if marker == 0xD8 || marker == 0xD9 || marker == 0x00 {
+            i += 2;
+        } else if i + 3 < data.len() {
+            let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+            i += 2 + len;
+        } else {
+            break;
+        }
+    }
+    false
 }
 
 fn write_raw_jpeg(
@@ -224,11 +270,7 @@ fn render_page_to_jpeg(
     }
 }
 
-fn encode_jpeg_image(
-    image: &image::RgbImage,
-    path: &Path,
-    quality: u8,
-) -> Result<(), Error> {
+fn encode_jpeg_image(image: &image::RgbImage, path: &Path, quality: u8) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
     let encoder = JpegEncoder::new_with_quality(writer, quality);
@@ -239,11 +281,7 @@ fn encode_jpeg_image(
 }
 
 #[cfg(feature = "vips")]
-fn encode_jpeg_vips(
-    image: &image::RgbImage,
-    path: &Path,
-    quality: u8,
-) -> Result<(), Error> {
+fn encode_jpeg_vips(image: &image::RgbImage, path: &Path, quality: u8) -> Result<(), Error> {
     let (width, height) = image.dimensions();
     let raw = image.as_raw();
 
@@ -256,7 +294,9 @@ fn encode_jpeg_vips(
     )
     .map_err(|e| Error::Render(format!("vips from memory: {e}")))?;
 
-    let path_str = path.to_str().ok_or_else(|| Error::Render("non-UTF8 path".into()))?;
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| Error::Render("non-UTF8 path".into()))?;
     libvips::ops::jpegsave_with_opts(
         &vips_image,
         path_str,
@@ -271,11 +311,7 @@ fn encode_jpeg_vips(
 }
 
 #[cfg(not(feature = "vips"))]
-fn encode_jpeg_vips(
-    _image: &image::RgbImage,
-    _path: &Path,
-    _quality: u8,
-) -> Result<(), Error> {
+fn encode_jpeg_vips(_image: &image::RgbImage, _path: &Path, _quality: u8) -> Result<(), Error> {
     Err(Error::InvalidArgs(
         "--encoder vips requires building with --features vips".into(),
     ))

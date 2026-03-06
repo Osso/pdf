@@ -53,11 +53,21 @@ pub fn run(
         run_multi_process(pdf_path, output_dir, &plan, &opts)?
     };
 
-    print_summary(rendered, extracted, plan.effective_workers, start, output_dir);
+    print_summary(
+        rendered,
+        extracted,
+        plan.effective_workers,
+        start,
+        output_dir,
+    );
     check_errors(errors)
 }
 
-fn build_render_plan(pdf_path: &Path, pages: Option<&str>, num_workers: u32) -> Result<RenderPlan, Error> {
+fn build_render_plan(
+    pdf_path: &Path,
+    pages: Option<&str>,
+    num_workers: u32,
+) -> Result<RenderPlan, Error> {
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(pdf_path, None)
@@ -74,7 +84,10 @@ fn build_render_plan(pdf_path: &Path, pages: Option<&str>, num_workers: u32) -> 
     };
 
     let effective_workers = num_workers.min(page_list.len() as u32);
-    Ok(RenderPlan { page_list, effective_workers })
+    Ok(RenderPlan {
+        page_list,
+        effective_workers,
+    })
 }
 
 fn run_single_process(
@@ -108,7 +121,9 @@ fn run_multi_process(
     collect_worker_results(children)
 }
 
-fn collect_worker_results(children: Vec<std::process::Child>) -> Result<(u32, u32, Vec<String>), Error> {
+fn collect_worker_results(
+    children: Vec<std::process::Child>,
+) -> Result<(u32, u32, Vec<String>), Error> {
     let mut total_rendered = 0u32;
     let mut total_extracted = 0u32;
     let mut all_errors = Vec::new();
@@ -138,7 +153,10 @@ fn check_errors(errors: Vec<String>) -> Result<(), Error> {
     for err in &errors {
         eprintln!("error: {err}");
     }
-    Err(Error::Render(format!("{} errors during rendering", errors.len())))
+    Err(Error::Render(format!(
+        "{} errors during rendering",
+        errors.len()
+    )))
 }
 
 fn spawn_worker(
@@ -215,7 +233,13 @@ fn push_range(parts: &mut Vec<String>, start: u32, end: u32) {
     }
 }
 
-fn print_summary(pages_rendered: u32, pages_extracted: u32, workers: u32, start: Instant, output_dir: &Path) {
+fn print_summary(
+    pages_rendered: u32,
+    pages_extracted: u32,
+    workers: u32,
+    start: Instant,
+    output_dir: &Path,
+) {
     let elapsed = start.elapsed().as_secs_f64();
     let summary = RenderSummary {
         pages_rendered,

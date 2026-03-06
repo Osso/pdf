@@ -116,7 +116,13 @@ fn main() -> ExitCode {
             &output,
             pages.as_deref(),
             workers,
-            RenderOptions { target_width, quality, box_type: r#box, extract_images, encoder },
+            RenderOptions {
+                target_width,
+                quality,
+                box_type: r#box,
+                extract_images,
+                encoder,
+            },
         ),
         Commands::RenderWorker {
             pdf,
@@ -131,7 +137,13 @@ fn main() -> ExitCode {
             &pdf,
             &output,
             &pages,
-            RenderOptions { target_width, quality, box_type: r#box, extract_images, encoder },
+            RenderOptions {
+                target_width,
+                quality,
+                box_type: r#box,
+                extract_images,
+                encoder,
+            },
         ),
     };
 

@@ -13,15 +13,11 @@ pub fn load_pdfium() -> Result<Pdfium, Error> {
 
     let bindings = exe_dir
         .and_then(|dir| {
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(
-                dir.as_path(),
-            ))
-            .ok()
+            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir.as_path()))
+                .ok()
         })
         .map(Ok)
-        .unwrap_or_else(|| {
-            Pdfium::bind_to_system_library()
-        })
+        .unwrap_or_else(|| Pdfium::bind_to_system_library())
         .map_err(|e| Error::PdfiumNotFound(e.to_string()))?;
 
     Ok(Pdfium::new(bindings))
