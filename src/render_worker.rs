@@ -144,19 +144,27 @@ fn try_extract_jpeg(
     let image_obj = obj.as_image_object()?;
 
     // Check that the image has exactly one filter and it's DCTDecode (JPEG)
-    if !is_jpeg_encoded(image_obj) {
+    if !is_extractable_jpeg(image_obj) {
         return None;
     }
 
     Some(write_raw_jpeg(image_obj, output_dir, page_num))
 }
 
-fn is_jpeg_encoded(image_obj: &PdfPageImageObject) -> bool {
+fn is_extractable_jpeg(image_obj: &PdfPageImageObject) -> bool {
     let filters = image_obj.filters();
     if filters.len() != 1 {
         return false;
     }
-    matches!(filters.get(0).ok(), Some(f) if f.name() == "DCTDecode")
+    if !matches!(filters.get(0).ok(), Some(f) if f.name() == "DCTDecode") {
+        return false;
+    }
+    // CMYK JPEGs extracted raw get their colors inverted when decoded as RGB.
+    // Fall through to pdfium rasterization which handles the conversion.
+    if matches!(image_obj.color_space(), Ok(PdfColorSpace::DeviceCMYK)) {
+        return false;
+    }
+    true
 }
 
 fn write_raw_jpeg(
