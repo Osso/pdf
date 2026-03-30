@@ -147,12 +147,15 @@ fn image_matches_page_aspect(image_obj: &PdfPageImageObject, page: &PdfPage) -> 
         return true;
     };
     let (pw, ph) = (page.width().value as f64, page.height().value as f64);
-    if img_w == 0 || img_h == 0 || pw == 0.0 || ph == 0.0 {
+    aspect_ratios_match(img_w as f64, img_h as f64, pw, ph)
+}
+
+/// Returns true if two rectangles have similar aspect ratios (within 10%).
+fn aspect_ratios_match(w1: f64, h1: f64, w2: f64, h2: f64) -> bool {
+    if w1 == 0.0 || h1 == 0.0 || w2 == 0.0 || h2 == 0.0 {
         return true;
     }
-    let img_ratio = img_w as f64 / img_h as f64;
-    let page_ratio = pw / ph;
-    let ratio_diff = (img_ratio - page_ratio).abs() / page_ratio;
+    let ratio_diff = ((w1 / h1) - (w2 / h2)).abs() / (w2 / h2);
     ratio_diff < 0.1
 }
 
@@ -311,4 +314,39 @@ fn encode_jpeg_vips(_image: &image::RgbImage, _path: &Path, _quality: u8) -> Res
     Err(Error::InvalidArgs(
         "--encoder vips requires building with --features vips".into(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aspect_match_same_ratio() {
+        assert!(aspect_ratios_match(2560.0, 3937.0, 477.0, 733.5));
+    }
+
+    #[test]
+    fn aspect_match_slightly_different() {
+        // 5% difference — within tolerance
+        assert!(aspect_ratios_match(2560.0, 3937.0, 480.0, 733.5));
+    }
+
+    #[test]
+    fn aspect_mismatch_spread_on_portrait_page() {
+        // Spread image (8284x6400 landscape) on portrait page (477x733.5)
+        assert!(!aspect_ratios_match(8284.0, 6400.0, 477.0, 733.5));
+    }
+
+    #[test]
+    fn aspect_mismatch_landscape_image_on_portrait_page() {
+        // Landscape image on portrait page — image wider than page expects
+        assert!(!aspect_ratios_match(6400.0, 3937.0, 477.0, 733.5));
+    }
+
+    #[test]
+    fn aspect_match_zero_dimensions_allow_extraction() {
+        assert!(aspect_ratios_match(0.0, 100.0, 477.0, 733.5));
+        assert!(aspect_ratios_match(100.0, 0.0, 477.0, 733.5));
+        assert!(aspect_ratios_match(100.0, 100.0, 0.0, 733.5));
+    }
 }
