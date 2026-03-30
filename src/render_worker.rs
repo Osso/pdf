@@ -49,77 +49,51 @@ pub fn render_pages(
     pages: &[u32],
     opts: &RenderOptions,
 ) -> Result<WorkerResult, Error> {
-    let RenderOptions {
-        target_width,
-        quality,
-        box_type,
-        extract_images,
-        encoder,
-    } = opts;
     let pdfium = load_pdfium()?;
-
     let mut document = pdfium
         .load_pdf_from_file(pdf_path, None)
         .map_err(|e| Error::PdfInvalid(format!("{}: {e}", pdf_path.display())))?;
+    let render_config = PdfRenderConfig::new().set_target_width(opts.target_width as i32);
 
-    let render_config = PdfRenderConfig::new().set_target_width(*target_width as i32);
-
-    let mut pages_rendered = 0u32;
-    let mut pages_extracted = 0u32;
-    let mut errors = Vec::new();
-
+    let mut result = WorkerResult { pages_rendered: 0, pages_extracted: 0, errors: Vec::new() };
     for &page_num in pages {
-        let page_index = (page_num - 1) as u16;
-
-        // Apply BleedBox as CropBox if requested
-        if *box_type == BoxType::Bleed {
-            apply_bleed_box(&mut document, page_index);
-        }
-
-        let page = match document.pages().get(page_index) {
-            Ok(page) => page,
-            Err(e) => {
-                errors.push(format!("page {page_num}: {e}"));
-                continue;
-            }
-        };
-
-        // Try direct JPEG extraction first — fall through to rasterization on failure
-        if *extract_images {
-            if let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num) {
-                pages_extracted += 1;
-                eprint!("\rExtracted page {page_num}");
-                continue;
-            }
-            // None = not a single-JPEG page, Some(Err) = corrupt JPEG — either way, rasterize
-        }
-
-        match render_page_to_jpeg(
-            &page,
-            &render_config,
-            output_dir,
-            page_num,
-            *quality,
-            *encoder,
-        ) {
-            Ok(()) => {
-                pages_rendered += 1;
-                eprint!("\rRendered page {page_num}");
-            }
-            Err(e) => {
-                errors.push(format!("page {page_num}: {e}"));
-            }
-        }
+        process_page(&mut document, &render_config, output_dir, page_num, opts, &mut result);
     }
-    if pages_rendered + pages_extracted > 0 {
+    if result.pages_rendered + result.pages_extracted > 0 {
         eprintln!();
     }
+    Ok(result)
+}
 
-    Ok(WorkerResult {
-        pages_rendered,
-        pages_extracted,
-        errors,
-    })
+fn process_page(
+    document: &mut PdfDocument,
+    render_config: &PdfRenderConfig,
+    output_dir: &Path,
+    page_num: u32,
+    opts: &RenderOptions,
+    result: &mut WorkerResult,
+) {
+    let page_index = (page_num - 1) as u16;
+    if opts.box_type == BoxType::Bleed {
+        apply_bleed_box(document, page_index);
+    }
+    let page = match document.pages().get(page_index) {
+        Ok(page) => page,
+        Err(e) => { result.errors.push(format!("page {page_num}: {e}")); return; }
+    };
+
+    if opts.extract_images {
+        if let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num) {
+            result.pages_extracted += 1;
+            eprint!("\rExtracted page {page_num}");
+            return;
+        }
+    }
+
+    match render_page_to_jpeg(&page, render_config, output_dir, page_num, opts.quality, opts.encoder) {
+        Ok(()) => { result.pages_rendered += 1; eprint!("\rRendered page {page_num}"); }
+        Err(e) => { result.errors.push(format!("page {page_num}: {e}")); }
+    }
 }
 
 fn apply_bleed_box(document: &mut PdfDocument, page_index: u16) {
@@ -152,12 +126,34 @@ fn try_extract_jpeg(page: &PdfPage, output_dir: &Path, page_num: u32) -> Option<
     let obj = objects.get(0).ok()?;
     let image_obj = obj.as_image_object()?;
 
-    // Check that the image has exactly one filter and it's DCTDecode (JPEG)
     if !is_extractable_jpeg(image_obj) {
+        return None;
+    }
+    // PDFs can embed a full two-page spread and use CropBox to show one half.
+    // Skip extraction if the image aspect ratio doesn't match the page.
+    if !image_matches_page_aspect(image_obj, page) {
         return None;
     }
 
     Some(write_raw_jpeg(image_obj, output_dir, page_num))
+}
+
+/// Check if the embedded image's aspect ratio roughly matches the page's.
+///
+/// A spread image (landscape) embedded in a portrait page means the page is
+/// cropping to show only part of the image — raw extraction would be wrong.
+fn image_matches_page_aspect(image_obj: &PdfPageImageObject, page: &PdfPage) -> bool {
+    let (Ok(img_w), Ok(img_h)) = (image_obj.width(), image_obj.height()) else {
+        return true;
+    };
+    let (pw, ph) = (page.width().value as f64, page.height().value as f64);
+    if img_w == 0 || img_h == 0 || pw == 0.0 || ph == 0.0 {
+        return true;
+    }
+    let img_ratio = img_w as f64 / img_h as f64;
+    let page_ratio = pw / ph;
+    let ratio_diff = (img_ratio - page_ratio).abs() / page_ratio;
+    ratio_diff < 0.1
 }
 
 fn is_extractable_jpeg(image_obj: &PdfPageImageObject) -> bool {
