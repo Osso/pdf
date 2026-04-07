@@ -55,9 +55,20 @@ pub fn render_pages(
         .map_err(|e| Error::PdfInvalid(format!("{}: {e}", pdf_path.display())))?;
     let render_config = PdfRenderConfig::new().set_target_width(opts.target_width as i32);
 
-    let mut result = WorkerResult { pages_rendered: 0, pages_extracted: 0, errors: Vec::new() };
+    let mut result = WorkerResult {
+        pages_rendered: 0,
+        pages_extracted: 0,
+        errors: Vec::new(),
+    };
     for &page_num in pages {
-        process_page(&mut document, &render_config, output_dir, page_num, opts, &mut result);
+        process_page(
+            &mut document,
+            &render_config,
+            output_dir,
+            page_num,
+            opts,
+            &mut result,
+        );
     }
     if result.pages_rendered + result.pages_extracted > 0 {
         eprintln!();
@@ -79,7 +90,10 @@ fn process_page(
     }
     let page = match document.pages().get(page_index) {
         Ok(page) => page,
-        Err(e) => { result.errors.push(format!("page {page_num}: {e}")); return; }
+        Err(e) => {
+            result.errors.push(format!("page {page_num}: {e}"));
+            return;
+        }
     };
 
     if opts.extract_images {
@@ -90,9 +104,21 @@ fn process_page(
         }
     }
 
-    match render_page_to_jpeg(&page, render_config, output_dir, page_num, opts.quality, opts.encoder) {
-        Ok(()) => { result.pages_rendered += 1; eprint!("\rRendered page {page_num}"); }
-        Err(e) => { result.errors.push(format!("page {page_num}: {e}")); }
+    match render_page_to_jpeg(
+        &page,
+        render_config,
+        output_dir,
+        page_num,
+        opts.quality,
+        opts.encoder,
+    ) {
+        Ok(()) => {
+            result.pages_rendered += 1;
+            eprint!("\rRendered page {page_num}");
+        }
+        Err(e) => {
+            result.errors.push(format!("page {page_num}: {e}"));
+        }
     }
 }
 
