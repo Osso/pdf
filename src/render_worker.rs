@@ -96,12 +96,12 @@ fn process_page(
         }
     };
 
-    if opts.extract_images {
-        if let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num) {
-            result.pages_extracted += 1;
-            eprint!("\rExtracted page {page_num}");
-            return;
-        }
+    if opts.extract_images
+        && let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num)
+    {
+        result.pages_extracted += 1;
+        eprint!("\rExtracted page {page_num}");
+        return;
     }
 
     match render_page_to_jpeg(
@@ -217,7 +217,7 @@ fn jpeg_is_cmyk(data: &[u8]) -> bool {
         }
         let marker = data[i + 1];
         // SOF0 = 0xC0, SOF1 = 0xC1, SOF2 = 0xC2
-        if matches!(marker, 0xC0 | 0xC1 | 0xC2) {
+        if matches!(marker, 0xC0..=0xC2) {
             // SOF layout: FF Cn [length:2] [precision:1] [height:2] [width:2] [components:1]
             if i + 9 < data.len() {
                 let num_components = data[i + 9];
