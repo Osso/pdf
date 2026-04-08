@@ -1,50 +1,41 @@
 use crate::error::Error;
 
 /// Parse a page range string like "1-10", "3,5,7", "1-5,8,10-12" into a sorted Vec of 1-based page numbers.
+fn parse_page_number(s: &str) -> Result<u32, Error> {
+    s.trim()
+        .parse()
+        .map_err(|_| Error::InvalidArgs(format!("invalid page number: {s}")))
+}
+
+fn validate_page(page: u32, max_page: u32) -> Result<(), Error> {
+    if page == 0 {
+        return Err(Error::InvalidArgs("page numbers are 1-based".into()));
+    }
+    if page > max_page {
+        return Err(Error::InvalidArgs(format!(
+            "page {page} exceeds page count {max_page}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn parse_page_range(input: &str, max_page: u32) -> Result<Vec<u32>, Error> {
     let mut pages = Vec::new();
 
     for part in input.split(',') {
         let part = part.trim();
-        if let Some((start, end)) = part.split_once('-') {
-            let start: u32 = start
-                .trim()
-                .parse()
-                .map_err(|_| Error::InvalidArgs(format!("invalid page number: {start}")))?;
-            let end: u32 = end
-                .trim()
-                .parse()
-                .map_err(|_| Error::InvalidArgs(format!("invalid page number: {end}")))?;
-
-            if start == 0 || end == 0 {
-                return Err(Error::InvalidArgs("page numbers are 1-based".into()));
-            }
+        if let Some((start_str, end_str)) = part.split_once('-') {
+            let start = parse_page_number(start_str)?;
+            let end = parse_page_number(end_str)?;
+            validate_page(start, max_page)?;
+            validate_page(end, max_page)?;
             if start > end {
-                return Err(Error::InvalidArgs(format!(
-                    "invalid range: {start} > {end}"
-                )));
+                return Err(Error::InvalidArgs(format!("invalid range: {start} > {end}")));
             }
-            if end > max_page {
-                return Err(Error::InvalidArgs(format!(
-                    "page {end} exceeds page count {max_page}"
-                )));
-            }
-
             pages.extend(start..=end);
         } else {
-            let page: u32 = part
-                .parse()
-                .map_err(|_| Error::InvalidArgs(format!("invalid page number: {part}")))?;
-
-            if page == 0 {
-                return Err(Error::InvalidArgs("page numbers are 1-based".into()));
-            }
-            if page > max_page {
-                return Err(Error::InvalidArgs(format!(
-                    "page {page} exceeds page count {max_page}"
-                )));
-            }
-
+            let page = parse_page_number(part)?;
+            validate_page(page, max_page)?;
             pages.push(page);
         }
     }
