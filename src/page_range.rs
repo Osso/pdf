@@ -30,7 +30,9 @@ pub fn parse_page_range(input: &str, max_page: u32) -> Result<Vec<u32>, Error> {
             validate_page(start, max_page)?;
             validate_page(end, max_page)?;
             if start > end {
-                return Err(Error::InvalidArgs(format!("invalid range: {start} > {end}")));
+                return Err(Error::InvalidArgs(format!(
+                    "invalid range: {start} > {end}"
+                )));
             }
             pages.extend(start..=end);
         } else {
