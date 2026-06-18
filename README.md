@@ -145,3 +145,7 @@ libvips is ~1.5x faster for JPEG encoding. The exception (9798892150095) is a re
 ## pdfium version
 
 The `pdfium_7350` feature flag is used to match the pdfium 7428 binary from AUR. To use a newer pdfium (7543+), change the feature in `Cargo.toml` to `pdfium_7543` or `pdfium_latest`.
+
+The Docker image and `deploy.sh` use the patched PDFium runtime in `vendor/pdfium/*.so`. The patch in `vendor/pdfium/large-xref-offsets.patch` widens xref stream object offsets so PDFs with objects past 4GiB do not render blank pages after 32-bit truncation.
+
+For local testing without installing the vendored library next to the `pdf` binary, set `PDFIUM_LIBRARY_PATH=/path/to/libpdfium.so`.

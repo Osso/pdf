@@ -2,8 +2,6 @@ FROM rust:1.92-bookworm AS builder
 
 WORKDIR /build
 RUN apt-get update && apt-get install -y cmake nasm && rm -rf /var/lib/apt/lists/*
-RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz \
-    | tar xz -C /tmp
 
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
@@ -13,5 +11,5 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim
 COPY --from=builder /usr/local/bin/pdf /usr/local/bin/pdf
-COPY --from=builder /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
+COPY vendor/pdfium/*.so /usr/lib/
 RUN ldconfig
