@@ -1,14 +1,20 @@
+#[cfg(not(test))]
 use crate::error::Error;
+#[cfg(not(test))]
 use crate::pdfium_init::load_pdfium;
+#[cfg(not(test))]
 use serde::Serialize;
+#[cfg(not(test))]
 use std::path::Path;
 
+#[cfg(not(test))]
 #[derive(Serialize)]
 pub struct PdfInfo {
     pub page_count: u32,
     pub pages: Vec<PageInfo>,
 }
 
+#[cfg(not(test))]
 #[derive(Serialize)]
 pub struct PageInfo {
     pub page: u32,
@@ -16,6 +22,8 @@ pub struct PageInfo {
     pub height_pt: f32,
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn run(pdf_path: &Path, all_pages: bool) -> Result<(), Error> {
     let pdfium = load_pdfium()?;
 

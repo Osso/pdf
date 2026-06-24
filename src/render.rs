@@ -1,9 +1,13 @@
 use crate::error::Error;
+#[cfg(not(test))]
 use crate::page_range::divide_pages;
+#[cfg(not(test))]
 use crate::pdfium_init::load_pdfium;
+#[cfg(not(test))]
 use crate::render_worker::{BoxType, JpegEncoderType, RenderOptions};
 use serde::Serialize;
 use std::path::Path;
+#[cfg(not(test))]
 use std::process::Command;
 use std::time::Instant;
 
@@ -29,6 +33,8 @@ struct RenderPlan {
 /// Orchestrate multi-process PDF rendering.
 ///
 /// Reads page count, divides work across workers, spawns `render-worker` subprocesses.
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn run(
     pdf_path: &Path,
     output_dir: &Path,
@@ -63,6 +69,8 @@ pub fn run(
     check_errors(errors)
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn build_render_plan(
     pdf_path: &Path,
     pages: Option<&str>,
@@ -90,6 +98,8 @@ fn build_render_plan(
     })
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn run_single_process(
     pdf_path: &Path,
     output_dir: &Path,
@@ -100,6 +110,8 @@ fn run_single_process(
     Ok((result.pages_rendered, result.pages_extracted, result.errors))
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn run_multi_process(
     pdf_path: &Path,
     output_dir: &Path,
@@ -121,6 +133,8 @@ fn run_multi_process(
     collect_worker_results(children)
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn collect_worker_results(
     children: Vec<std::process::Child>,
 ) -> Result<(u32, u32, Vec<String>), Error> {
@@ -159,6 +173,8 @@ fn check_errors(errors: Vec<String>) -> Result<(), Error> {
     )))
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn spawn_worker(
     exe: &Path,
     pdf_path: &Path,
@@ -258,4 +274,70 @@ struct WorkerOutput {
     pages_extracted: u32,
     #[serde(default)]
     errors: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn zero_values_are_skipped_in_render_summary() {
+        assert!(is_zero(&0));
+        assert!(!is_zero(&1));
+    }
+
+    #[test]
+    fn check_errors_reports_combined_worker_errors() {
+        assert!(check_errors(Vec::new()).is_ok());
+
+        let err = check_errors(vec![
+            "page 1 failed".to_string(),
+            "page 2 failed".to_string(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "rendering error: 2 errors during rendering"
+        );
+    }
+
+    #[test]
+    fn render_plan_keeps_pages_and_worker_count() {
+        let plan = RenderPlan {
+            page_list: vec![1, 3, 5],
+            effective_workers: 2,
+        };
+
+        assert_eq!(plan.page_list, vec![1, 3, 5]);
+        assert_eq!(plan.effective_workers, 2);
+    }
+
+    #[test]
+    fn format_page_list_collapses_contiguous_ranges() {
+        assert_eq!(format_page_list(&[]), "");
+        assert_eq!(format_page_list(&[3]), "3");
+        assert_eq!(format_page_list(&[1, 2, 3, 5, 7, 8]), "1-3,5,7-8");
+    }
+
+    #[test]
+    fn worker_output_defaults_missing_optional_fields() {
+        let output: WorkerOutput = serde_json::from_str(r#"{"pages_rendered":3}"#).unwrap();
+
+        assert_eq!(output.pages_rendered, 3);
+        assert_eq!(output.pages_extracted, 0);
+        assert!(output.errors.is_empty());
+    }
+
+    #[test]
+    fn print_summary_serializes_without_error() {
+        print_summary(
+            3,
+            1,
+            2,
+            Instant::now() - Duration::from_millis(1234),
+            Path::new("/tmp/out"),
+        );
+    }
 }

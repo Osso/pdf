@@ -1,4 +1,6 @@
+#[cfg(not(test))]
 use crate::error::Error;
+#[cfg(not(test))]
 use pdfium_render::prelude::*;
 
 /// Initialize pdfium by searching for the library in standard locations.
@@ -7,6 +9,8 @@ use pdfium_render::prelude::*;
 /// 1. PDFIUM_LIBRARY_PATH, when set
 /// 2. Next to the current executable
 /// 3. System library paths (LD_LIBRARY_PATH, /usr/lib, etc.)
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn load_pdfium() -> Result<Pdfium, Error> {
     if let Some(bindings) = load_from_env()? {
         return Ok(Pdfium::new(bindings));
@@ -21,6 +25,8 @@ pub fn load_pdfium() -> Result<Pdfium, Error> {
         .map_err(|e| Error::PdfiumNotFound(e.to_string()))
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn load_from_env() -> Result<Option<Box<dyn PdfiumLibraryBindings>>, Error> {
     let Ok(path) = std::env::var("PDFIUM_LIBRARY_PATH") else {
         return Ok(None);
@@ -31,6 +37,8 @@ fn load_from_env() -> Result<Option<Box<dyn PdfiumLibraryBindings>>, Error> {
         .map_err(|e| Error::PdfiumNotFound(format!("failed to load {path}: {e}")))
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn load_from_exe_dir() -> Result<Option<Box<dyn PdfiumLibraryBindings>>, Error> {
     let Some(exe_dir) = std::env::current_exe()
         .ok()

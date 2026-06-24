@@ -29,3 +29,32 @@ impl Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_distinguish_failure_classes() {
+        assert_eq!(
+            Error::InvalidArgs("bad".into()).exit_code(),
+            ExitCode::from(1)
+        );
+        assert_eq!(
+            Error::PdfInvalid("bad".into()).exit_code(),
+            ExitCode::from(2)
+        );
+        assert_eq!(
+            Error::PdfiumNotFound("missing".into()).exit_code(),
+            ExitCode::from(3)
+        );
+        assert_eq!(
+            Error::Render("failed".into()).exit_code(),
+            ExitCode::from(4)
+        );
+        assert_eq!(
+            Error::Io(std::io::Error::from(std::io::ErrorKind::Other)).exit_code(),
+            ExitCode::from(5)
+        );
+    }
+}

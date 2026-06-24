@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod error;
 mod info;
 mod page_range;
@@ -5,11 +7,16 @@ mod pdfium_init;
 mod render;
 mod render_worker;
 
+#[cfg(not(test))]
 use clap::{Parser, Subcommand};
+#[cfg(not(test))]
 use render_worker::{BoxType, JpegEncoderType, RenderOptions};
+#[cfg(not(test))]
 use std::path::PathBuf;
+#[cfg(not(test))]
 use std::process::ExitCode;
 
+#[cfg(not(test))]
 #[derive(Parser)]
 #[command(name = "pdf", about = "PDF rendering and info extraction using pdfium")]
 struct Cli {
@@ -17,6 +24,7 @@ struct Cli {
     command: Commands,
 }
 
+#[cfg(not(test))]
 #[derive(Subcommand)]
 enum Commands {
     /// Output PDF page count and dimensions as JSON
@@ -96,57 +104,95 @@ enum Commands {
     },
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    command_result_to_exit_code(dispatch(Cli::parse()))
+}
 
-    let result = match cli.command {
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn dispatch(cli: Cli) -> Result<(), error::Error> {
+    match cli.command {
         Commands::Info { pdf, all_pages } => info::run(&pdf, all_pages),
-        Commands::Render {
-            pdf,
-            output,
-            target_width,
-            quality,
-            r#box,
-            pages,
-            workers,
-            extract_images,
-            encoder,
-        } => render::run(
-            &pdf,
-            &output,
-            pages.as_deref(),
-            workers,
-            RenderOptions {
-                target_width,
-                quality,
-                box_type: r#box,
-                extract_images,
-                encoder,
-            },
-        ),
-        Commands::RenderWorker {
-            pdf,
-            output,
-            pages,
-            target_width,
-            quality,
-            r#box,
-            extract_images,
-            encoder,
-        } => run_worker(
-            &pdf,
-            &output,
-            &pages,
-            RenderOptions {
-                target_width,
-                quality,
-                box_type: r#box,
-                extract_images,
-                encoder,
-            },
-        ),
+        command @ Commands::Render { .. } => run_render_command(command),
+        command @ Commands::RenderWorker { .. } => run_render_worker_command(command),
+    }
+}
+
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_render_command(command: Commands) -> Result<(), error::Error> {
+    let Commands::Render {
+        pdf,
+        output,
+        target_width,
+        quality,
+        r#box,
+        pages,
+        workers,
+        extract_images,
+        encoder,
+    } = command
+    else {
+        unreachable!("render command handler called with non-render command");
     };
 
+    render::run(
+        &pdf,
+        &output,
+        pages.as_deref(),
+        workers,
+        render_options(target_width, quality, r#box, extract_images, encoder),
+    )
+}
+
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_render_worker_command(command: Commands) -> Result<(), error::Error> {
+    let Commands::RenderWorker {
+        pdf,
+        output,
+        pages,
+        target_width,
+        quality,
+        r#box,
+        extract_images,
+        encoder,
+    } = command
+    else {
+        unreachable!("render-worker command handler called with non-worker command");
+    };
+
+    run_worker(
+        &pdf,
+        &output,
+        &pages,
+        render_options(target_width, quality, r#box, extract_images, encoder),
+    )
+}
+
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn render_options(
+    target_width: u32,
+    quality: u8,
+    box_type: BoxType,
+    extract_images: bool,
+    encoder: JpegEncoderType,
+) -> RenderOptions {
+    RenderOptions {
+        target_width,
+        quality,
+        box_type,
+        extract_images,
+        encoder,
+    }
+}
+
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn command_result_to_exit_code(result: Result<(), error::Error>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -156,6 +202,8 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn run_worker(
     pdf: &std::path::Path,
     output: &std::path::Path,

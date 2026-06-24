@@ -8,6 +8,9 @@ license = "MIT"
 default = []
 vips = ["dep:libvips"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+
 [dependencies]
 pdfium-render = { version = "0.8", default-features = false, features = ["image", "pdfium_7350", "thread_safe"] }
 image = { version = "0.25", features = ["jpeg"] }

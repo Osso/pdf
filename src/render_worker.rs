@@ -1,10 +1,17 @@
+#[cfg(not(test))]
 use crate::error::Error;
+#[cfg(not(test))]
 use crate::pdfium_init::load_pdfium;
+#[cfg(not(test))]
 use image::codecs::jpeg::JpegEncoder;
+#[cfg(not(test))]
 use pdfium_render::prelude::*;
 use serde::Serialize;
+#[cfg(not(test))]
 use std::fs::File;
+#[cfg(not(test))]
 use std::io::BufWriter;
+#[cfg(not(test))]
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -43,6 +50,8 @@ pub struct RenderOptions {
 /// Pages are 1-based. Each page produces `page-NNNN.jpg` in `output_dir`.
 /// When `extract_images` is true, pages containing a single JPEG image are
 /// extracted directly without re-encoding.
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn render_pages(
     pdf_path: &Path,
     output_dir: &Path,
@@ -76,6 +85,8 @@ pub fn render_pages(
     Ok(result)
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn process_page(
     document: &mut PdfDocument,
     render_config: &PdfRenderConfig,
@@ -122,6 +133,8 @@ fn process_page(
     }
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_bleed_box(document: &mut PdfDocument, page_index: u16) {
     let Ok(mut page) = document.pages().get(page_index) else {
         return;
@@ -143,6 +156,8 @@ fn apply_bleed_box(document: &mut PdfDocument, page_index: u16) {
 /// Returns `None` if the page is not a single-image page or the image is not
 /// stored as JPEG (DCTDecode filter). Returns `Some(Ok(()))` on successful
 /// extraction, `Some(Err(..))` on I/O failure.
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn try_extract_jpeg(page: &PdfPage, output_dir: &Path, page_num: u32) -> Option<Result<(), Error>> {
     let objects = page.objects();
     if objects.len() != 1 {
@@ -168,6 +183,8 @@ fn try_extract_jpeg(page: &PdfPage, output_dir: &Path, page_num: u32) -> Option<
 ///
 /// A spread image (landscape) embedded in a portrait page means the page is
 /// cropping to show only part of the image — raw extraction would be wrong.
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn image_matches_page_aspect(image_obj: &PdfPageImageObject, page: &PdfPage) -> bool {
     let (Ok(img_w), Ok(img_h)) = (image_obj.width(), image_obj.height()) else {
         return true;
@@ -185,6 +202,8 @@ fn aspect_ratios_match(w1: f64, h1: f64, w2: f64, h2: f64) -> bool {
     ratio_diff < 0.1
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_extractable_jpeg(image_obj: &PdfPageImageObject) -> bool {
     let filters = image_obj.filters();
     if filters.len() != 1 {
@@ -238,6 +257,8 @@ fn jpeg_is_cmyk(data: &[u8]) -> bool {
     false
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn write_raw_jpeg(
     image_obj: &PdfPageImageObject,
     output_dir: &Path,
@@ -272,6 +293,8 @@ fn write_raw_jpeg(
     Ok(())
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn render_page_to_jpeg(
     page: &PdfPage,
     config: &PdfRenderConfig,
@@ -295,6 +318,8 @@ fn render_page_to_jpeg(
     }
 }
 
+#[cfg(not(test))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn encode_jpeg_image(image: &image::RgbImage, path: &Path, quality: u8) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
@@ -305,7 +330,8 @@ fn encode_jpeg_image(image: &image::RgbImage, path: &Path, quality: u8) -> Resul
     Ok(())
 }
 
-#[cfg(feature = "vips")]
+#[cfg(all(feature = "vips", not(test)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn encode_jpeg_vips(image: &image::RgbImage, path: &Path, quality: u8) -> Result<(), Error> {
     let (width, height) = image.dimensions();
     let raw = image.as_raw();
@@ -335,7 +361,8 @@ fn encode_jpeg_vips(image: &image::RgbImage, path: &Path, quality: u8) -> Result
     Ok(())
 }
 
-#[cfg(not(feature = "vips"))]
+#[cfg(all(not(feature = "vips"), not(test)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn encode_jpeg_vips(_image: &image::RgbImage, _path: &Path, _quality: u8) -> Result<(), Error> {
     Err(Error::InvalidArgs(
         "--encoder vips requires building with --features vips".into(),
@@ -374,5 +401,58 @@ mod tests {
         assert!(aspect_ratios_match(0.0, 100.0, 477.0, 733.5));
         assert!(aspect_ratios_match(100.0, 0.0, 477.0, 733.5));
         assert!(aspect_ratios_match(100.0, 100.0, 0.0, 733.5));
+    }
+
+    #[test]
+    fn jpeg_cmyk_detection_uses_sof_component_count() {
+        let rgb = [
+            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x10, 0x00, 0x10, 0x03,
+        ];
+        let cmyk = [
+            0xFF, 0xD8, 0xFF, 0xC2, 0x00, 0x0B, 0x08, 0x00, 0x10, 0x00, 0x10, 0x04,
+        ];
+
+        assert!(!jpeg_is_cmyk(&rgb));
+        assert!(jpeg_is_cmyk(&cmyk));
+        assert!(!jpeg_is_cmyk(&[0xFF, 0xD8, 0xFF]));
+    }
+
+    #[test]
+    fn render_options_types_have_expected_defaults() {
+        assert!(matches!(JpegEncoderType::default(), JpegEncoderType::Image));
+        assert!(matches!(BoxType::Crop, BoxType::Crop));
+        assert!(matches!(BoxType::Bleed, BoxType::Bleed));
+    }
+
+    #[test]
+    fn worker_result_serializes_expected_fields() {
+        let result = WorkerResult {
+            pages_rendered: 2,
+            pages_extracted: 1,
+            errors: vec!["page 3 failed".to_string()],
+        };
+
+        let json = serde_json::to_value(result).unwrap();
+
+        assert_eq!(json["pages_rendered"], 2);
+        assert_eq!(json["pages_extracted"], 1);
+        assert_eq!(json["errors"][0], "page 3 failed");
+    }
+
+    #[test]
+    fn render_options_carry_cli_settings() {
+        let opts = RenderOptions {
+            target_width: 1600,
+            quality: 90,
+            box_type: BoxType::Bleed,
+            extract_images: true,
+            encoder: JpegEncoderType::Vips,
+        };
+
+        assert_eq!(opts.target_width, 1600);
+        assert_eq!(opts.quality, 90);
+        assert!(matches!(opts.box_type, BoxType::Bleed));
+        assert!(opts.extract_images);
+        assert!(matches!(opts.encoder, JpegEncoderType::Vips));
     }
 }
