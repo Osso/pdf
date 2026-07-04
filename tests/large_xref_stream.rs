@@ -9,6 +9,7 @@ const FOUR_GIB: u64 = 0x1_0000_0000;
 const PATCHED_PDFIUM: &str = "/home/osso/Repos/pdfium/pdfium/out/Shared/libpdfium.so";
 
 #[test]
+#[ignore = "requires locally built patched pdfium at /home/osso/Repos/pdfium/pdfium/out/Shared/libpdfium.so"]
 fn renders_page_with_xref_stream_offsets_above_4gb() {
     assert!(
         Path::new(PATCHED_PDFIUM).exists(),
