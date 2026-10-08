@@ -493,6 +493,7 @@ mod tests {
         assert_eq!(opts.quality, 90);
         assert!(matches!(opts.box_type, BoxType::Bleed));
         assert!(opts.extract_images);
+        assert_eq!(opts.split_over_pixels, None);
         assert!(matches!(opts.encoder, JpegEncoderType::Vips));
     }
 }
