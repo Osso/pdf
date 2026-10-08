@@ -44,6 +44,7 @@ pdf render document.pdf -o /tmp/output --workers 4 --target-width 2560
 pdf render document.pdf -o /tmp/output --pages 1-10 --quality 90
 pdf render document.pdf -o /tmp/output --box bleed
 pdf render document.pdf -o /tmp/output --extract-images
+pdf render document.pdf -o /tmp/output --split-over-pixels 25000000
 ```
 
 Outputs `page-NNNN.jpg` files. Progress on stderr, JSON summary on stdout:
@@ -56,6 +57,31 @@ Outputs `page-NNNN.jpg` files. Progress on stderr, JSON summary on stdout:
   "output_dir": "/tmp/output"
 }
 ```
+
+### Bounded physical page slices
+
+`--split-over-pixels 25000000` compares each page's pixel area at `--target-width` against the threshold. Pages at or below it remain `page-NNNN.jpg`. Larger pages produce `page-NNNN-slice-NNNN.jpg`, ordered top-to-bottom with zero-based slice indices. Nominal slice height is `round(1.5 * target_width)`; a remaining tail strictly smaller than 25% of that height merges into the previous slice. Total height uses PDFium's existing rounding: `round(page_height * (target_width / page_width))` in single-precision arithmetic. The threshold triggers splitting, not a hard per-output area limit.
+
+Each region temporarily adjusts the effective CropBox (including MediaBox intersection and intrinsic rotation), then reloads the page and allocates only a region-sized bitmap. BleedBox selection still applies before splitting. Native PDFium rendering retains annotations/form rendering; the source PDF is never saved or changed on disk. Embedded source images may still require decoding at their original resolution.
+
+With this flag, all pages render at the requested width and quality; `--extract-images` cannot bypass rendering. Without the flag, existing extraction and summary behavior is unchanged.
+
+The summary adds `outputs`, sorted by `source_page`, then `slice`, and `pages_rendered` counts physical output files:
+
+```json
+{
+  "pages_rendered": 2,
+  "workers_used": 1,
+  "elapsed_secs": 0.5,
+  "output_dir": "/tmp/output",
+  "outputs": [
+    { "file": "page-0001-slice-0000.jpg", "source_page": 1, "slice": 0, "width": 2560, "height": 3840 },
+    { "file": "page-0001-slice-0001.jpg", "source_page": 1, "slice": 1, "width": 2560, "height": 4000 }
+  ]
+}
+```
+
+`file` is relative to `output_dir`; `source_page` is one-based. Unsplit outputs have `slice: 0`. The hidden `render-worker` command accepts the same flag and returns the same output entries to its parent.
 
 ### Direct image extraction
 
@@ -75,6 +101,7 @@ Note: extracted images preserve their original dimensions and quality, bypassing
 | `--pages` | all | Page range: `1-10`, `3,5,7`, `1-5,8` |
 | `--workers` | 4 | Number of worker processes |
 | `--extract-images` | off | Extract raw JPEG from single-image pages |
+| `--split-over-pixels` | off | Split pages above rendered pixel area; disables direct extraction |
 
 ## Architecture
 

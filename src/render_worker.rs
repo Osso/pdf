@@ -6,7 +6,7 @@ use crate::pdfium_init::load_pdfium;
 use image::codecs::jpeg::JpegEncoder;
 #[cfg(not(test))]
 use pdfium_render::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 #[cfg(not(test))]
 use std::fs::File;
 #[cfg(not(test))]
@@ -29,11 +29,24 @@ pub enum JpegEncoderType {
     Vips,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct WorkerResult {
     pub pages_rendered: u32,
+    #[serde(default)]
     pub pages_extracted: u32,
+    #[serde(default)]
     pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<Vec<RenderedOutput>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RenderedOutput {
+    pub file: String,
+    pub source_page: u32,
+    pub slice: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Rendering options shared between single-process and multi-process modes.
@@ -43,6 +56,7 @@ pub struct RenderOptions {
     pub box_type: BoxType,
     pub extract_images: bool,
     pub encoder: JpegEncoderType,
+    pub split_over_pixels: Option<u64>,
 }
 
 /// Render a range of pages from a PDF to JPEG files.
@@ -68,6 +82,7 @@ pub fn render_pages(
         pages_rendered: 0,
         pages_extracted: 0,
         errors: Vec::new(),
+        outputs: opts.split_over_pixels.map(|_| Vec::new()),
     };
     for &page_num in pages {
         process_page(
@@ -106,6 +121,19 @@ fn process_page(
             return;
         }
     };
+
+    if let Some(threshold) = opts.split_over_pixels {
+        drop(page);
+        match crate::render_split::render_page(document, output_dir, page_num, opts, threshold) {
+            Ok(outputs) => {
+                result.pages_rendered += outputs.len() as u32;
+                result.outputs.as_mut().unwrap().extend(outputs);
+                eprint!("\rRendered page {page_num}");
+            }
+            Err(e) => result.errors.push(format!("page {page_num}: {e}")),
+        }
+        return;
+    }
 
     if opts.extract_images
         && let Some(Ok(())) = try_extract_jpeg(&page, output_dir, page_num)
@@ -312,6 +340,16 @@ fn render_page_to_jpeg(
     let filename = format!("page-{page_num:04}.jpg");
     let path = output_dir.join(filename);
 
+    encode_jpeg(&image, &path, quality, encoder_type)
+}
+
+#[cfg(not(test))]
+pub(crate) fn encode_jpeg(
+    image: &image::RgbImage,
+    path: &Path,
+    quality: u8,
+    encoder_type: JpegEncoderType,
+) -> Result<(), Error> {
     match encoder_type {
         JpegEncoderType::Image => encode_jpeg_image(&image, &path, quality),
         JpegEncoderType::Vips => encode_jpeg_vips(&image, &path, quality),

@@ -5,6 +5,8 @@ mod info;
 mod page_range;
 mod pdfium_init;
 mod render;
+#[cfg(not(test))]
+mod render_split;
 mod render_worker;
 
 #[cfg(not(test))]
@@ -70,6 +72,10 @@ enum Commands {
         #[arg(long)]
         extract_images: bool,
 
+        /// Split pages exceeding this rendered pixel area into physical JPEG slices
+        #[arg(long)]
+        split_over_pixels: Option<u64>,
+
         /// JPEG encoder backend
         #[arg(long, value_enum, default_value = "image")]
         encoder: JpegEncoderType,
@@ -97,6 +103,10 @@ enum Commands {
 
         #[arg(long)]
         extract_images: bool,
+
+        /// Split pages exceeding this rendered pixel area into physical JPEG slices
+        #[arg(long)]
+        split_over_pixels: Option<u64>,
 
         /// JPEG encoder backend
         #[arg(long, value_enum, default_value = "image")]
@@ -132,6 +142,7 @@ fn run_render_command(command: Commands) -> Result<(), error::Error> {
         pages,
         workers,
         extract_images,
+        split_over_pixels,
         encoder,
     } = command
     else {
@@ -143,7 +154,14 @@ fn run_render_command(command: Commands) -> Result<(), error::Error> {
         &output,
         pages.as_deref(),
         workers,
-        render_options(target_width, quality, r#box, extract_images, encoder),
+        render_options(
+            target_width,
+            quality,
+            r#box,
+            extract_images,
+            encoder,
+            split_over_pixels,
+        ),
     )
 }
 
@@ -158,6 +176,7 @@ fn run_render_worker_command(command: Commands) -> Result<(), error::Error> {
         quality,
         r#box,
         extract_images,
+        split_over_pixels,
         encoder,
     } = command
     else {
@@ -168,7 +187,14 @@ fn run_render_worker_command(command: Commands) -> Result<(), error::Error> {
         &pdf,
         &output,
         &pages,
-        render_options(target_width, quality, r#box, extract_images, encoder),
+        render_options(
+            target_width,
+            quality,
+            r#box,
+            extract_images,
+            encoder,
+            split_over_pixels,
+        ),
     )
 }
 
@@ -180,12 +206,14 @@ fn render_options(
     box_type: BoxType,
     extract_images: bool,
     encoder: JpegEncoderType,
+    split_over_pixels: Option<u64>,
 ) -> RenderOptions {
     RenderOptions {
         target_width,
         quality,
         box_type,
         extract_images,
+        split_over_pixels,
         encoder,
     }
 }

@@ -5,6 +5,7 @@ use crate::page_range::divide_pages;
 use crate::pdfium_init::load_pdfium;
 #[cfg(not(test))]
 use crate::render_worker::{BoxType, JpegEncoderType, RenderOptions};
+use crate::render_worker::{RenderedOutput, WorkerResult};
 use serde::Serialize;
 use std::path::Path;
 #[cfg(not(test))]
@@ -19,6 +20,8 @@ struct RenderSummary {
     workers_used: u32,
     elapsed_secs: f64,
     output_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outputs: Option<Vec<RenderedOutput>>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -53,20 +56,21 @@ pub fn run(
         plan.effective_workers
     );
 
-    let (rendered, extracted, errors) = if plan.effective_workers <= 1 {
+    let result = if plan.effective_workers <= 1 {
         run_single_process(pdf_path, output_dir, &plan.page_list, &opts)?
     } else {
         run_multi_process(pdf_path, output_dir, &plan, &opts)?
     };
 
     print_summary(
-        rendered,
-        extracted,
+        result.pages_rendered,
+        result.pages_extracted,
         plan.effective_workers,
         start,
         output_dir,
+        result.outputs,
     );
-    check_errors(errors)
+    check_errors(result.errors)
 }
 
 #[cfg(not(test))]
@@ -105,9 +109,8 @@ fn run_single_process(
     output_dir: &Path,
     pages: &[u32],
     opts: &RenderOptions,
-) -> Result<(u32, u32, Vec<String>), Error> {
-    let result = crate::render_worker::render_pages(pdf_path, output_dir, pages, opts)?;
-    Ok((result.pages_rendered, result.pages_extracted, result.errors))
+) -> Result<WorkerResult, Error> {
+    crate::render_worker::render_pages(pdf_path, output_dir, pages, opts)
 }
 
 #[cfg(not(test))]
@@ -117,7 +120,7 @@ fn run_multi_process(
     output_dir: &Path,
     plan: &RenderPlan,
     opts: &RenderOptions,
-) -> Result<(u32, u32, Vec<String>), Error> {
+) -> Result<WorkerResult, Error> {
     let ranges = divide_pages(plan.page_list.len() as u32, plan.effective_workers);
     let current_exe = std::env::current_exe()?;
 
@@ -135,29 +138,43 @@ fn run_multi_process(
 
 #[cfg(not(test))]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn collect_worker_results(
-    children: Vec<std::process::Child>,
-) -> Result<(u32, u32, Vec<String>), Error> {
-    let mut total_rendered = 0u32;
-    let mut total_extracted = 0u32;
-    let mut all_errors = Vec::new();
+fn collect_worker_results(children: Vec<std::process::Child>) -> Result<WorkerResult, Error> {
+    let mut combined = WorkerResult {
+        pages_rendered: 0,
+        pages_extracted: 0,
+        errors: Vec::new(),
+        outputs: None,
+    };
 
     for (i, child) in children.into_iter().enumerate() {
         let output = child.wait_with_output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            all_errors.push(format!("worker {i}: exit {}: {stderr}", output.status));
+            combined
+                .errors
+                .push(format!("worker {i}: exit {}: {stderr}", output.status));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Ok(result) = serde_json::from_str::<WorkerOutput>(&stdout) {
-            total_rendered += result.pages_rendered;
-            total_extracted += result.pages_extracted;
-            all_errors.extend(result.errors);
+        match serde_json::from_str::<WorkerResult>(&stdout) {
+            Ok(result) => {
+                combined.pages_rendered += result.pages_rendered;
+                combined.pages_extracted += result.pages_extracted;
+                combined.errors.extend(result.errors);
+                if let Some(outputs) = result.outputs {
+                    combined
+                        .outputs
+                        .get_or_insert_with(Vec::new)
+                        .extend(outputs);
+                }
+            }
+            Err(error) => combined
+                .errors
+                .push(format!("worker {i}: invalid output JSON: {error}")),
         }
     }
 
-    Ok((total_rendered, total_extracted, all_errors))
+    Ok(combined)
 }
 
 fn check_errors(errors: Vec<String>) -> Result<(), Error> {
@@ -208,6 +225,9 @@ fn spawn_worker(
         .arg("--encoder")
         .arg(encoder_str);
 
+    if let Some(threshold) = opts.split_over_pixels {
+        cmd.arg("--split-over-pixels").arg(threshold.to_string());
+    }
     if opts.extract_images {
         cmd.arg("--extract-images");
     }
@@ -255,7 +275,11 @@ fn print_summary(
     workers: u32,
     start: Instant,
     output_dir: &Path,
+    mut outputs: Option<Vec<RenderedOutput>>,
 ) {
+    if let Some(outputs) = outputs.as_mut() {
+        outputs.sort_by_key(|output| (output.source_page, output.slice));
+    }
     let elapsed = start.elapsed().as_secs_f64();
     let summary = RenderSummary {
         pages_rendered,
@@ -263,17 +287,9 @@ fn print_summary(
         workers_used: workers,
         elapsed_secs: (elapsed * 100.0).round() / 100.0,
         output_dir: output_dir.display().to_string(),
+        outputs,
     };
     println!("{}", serde_json::to_string_pretty(&summary).unwrap());
-}
-
-#[derive(serde::Deserialize)]
-struct WorkerOutput {
-    pages_rendered: u32,
-    #[serde(default)]
-    pages_extracted: u32,
-    #[serde(default)]
-    errors: Vec<String>,
 }
 
 #[cfg(test)]
@@ -323,7 +339,7 @@ mod tests {
 
     #[test]
     fn worker_output_defaults_missing_optional_fields() {
-        let output: WorkerOutput = serde_json::from_str(r#"{"pages_rendered":3}"#).unwrap();
+        let output: WorkerResult = serde_json::from_str(r#"{"pages_rendered":3}"#).unwrap();
 
         assert_eq!(output.pages_rendered, 3);
         assert_eq!(output.pages_extracted, 0);
@@ -338,6 +354,7 @@ mod tests {
             2,
             Instant::now() - Duration::from_millis(1234),
             Path::new("/tmp/out"),
+            None,
         );
     }
 }
