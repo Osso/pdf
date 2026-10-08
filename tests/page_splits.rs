@@ -221,6 +221,55 @@ fn cropped_rotated_and_bleed_regions_match_full_page() {
 }
 
 #[test]
+fn hidden_worker_rounds_odd_width_and_keeps_exact_quarter_tail() {
+    let root = temp_dir();
+    let pdf = root.join("rounding.pdf");
+    write_pdf(&pdf, &[(100, 339, 0)]);
+    let out = root.join("out");
+    fs::create_dir(&out).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_pdf"))
+        .arg("render-worker")
+        .arg(&pdf)
+        .arg("-o")
+        .arg(&out)
+        .args([
+            "--pages",
+            "1",
+            "--target-width",
+            "101",
+            "--quality",
+            "100",
+            "--split-over-pixels",
+            "30000",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let outputs = summary["outputs"].as_array().unwrap();
+    let heights: Vec<_> = outputs
+        .iter()
+        .map(|e| e["height"].as_u64().unwrap())
+        .collect();
+    assert_eq!(heights, vec![152, 152, 38]);
+    assert_eq!(summary["pages_rendered"], 3);
+    for entry in outputs {
+        assert_eq!(entry["width"], 101);
+        assert_eq!(
+            image::open(out.join(entry["file"].as_str().unwrap()))
+                .unwrap()
+                .dimensions(),
+            (101, entry["height"].as_u64().unwrap() as u32)
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn single_jpeg_extraction_cannot_bypass_splitting() {
     let root = temp_dir();
     let pdf = root.join("image.pdf");

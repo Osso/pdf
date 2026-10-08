@@ -468,6 +468,7 @@ mod tests {
             pages_rendered: 2,
             pages_extracted: 1,
             errors: vec!["page 3 failed".to_string()],
+            outputs: None,
         };
 
         let json = serde_json::to_value(result).unwrap();
@@ -485,6 +486,7 @@ mod tests {
             box_type: BoxType::Bleed,
             extract_images: true,
             encoder: JpegEncoderType::Vips,
+            split_over_pixels: None,
         };
 
         assert_eq!(opts.target_width, 1600);
